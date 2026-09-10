@@ -33,6 +33,23 @@ CPA 明文管理密钥: config.yaml 被 bcrypt 加密前的原始密钥
 
 授权文件（OAuth/JSON）与配置型 API Key 会统一显示在权重池中。授权文件使用 CPA 返回的 `auth_index` 作为稳定 ID，写入时按官方要求发送 `PATCH /auth-files/fields`，不会改写授权文件内容。
 
-## Windows EXE
+## 桌面安装包
 
-推送到 GitHub 后，在 `Actions → Build Windows EXE → Run workflow` 手动编译，或推送 `v*` 标签触发。构建产物 `CPA-Route-Control-windows-x64` 包含便携 `.exe` 和 NSIS 安装包。
+GitHub Actions 支持 Windows 和 macOS 两个平台的 Tauri 桌面构建：
+
+- Windows x64：便携 `.exe` 与 NSIS 安装包；
+- macOS：`.app` 与 `.dmg`。
+
+触发方式：在 `Actions → Build Desktop Releases → Run workflow` 手动编译，或推送 `v*` 标签。
+
+本地构建：
+
+```powershell
+# Windows
+npm run tauri build -- --bundles nsis
+```
+
+```bash
+# macOS
+npm run tauri build -- --bundles app,dmg
+```

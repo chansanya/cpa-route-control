@@ -1,4 +1,4 @@
-name: Build Windows EXE
+name: Build Desktop Releases
 
 on:
   workflow_dispatch:
@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: windows-build-${{ github.ref }}
+  group: desktop-build-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -47,10 +47,10 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      - name: Build Tauri NSIS installer
+      - name: Build Tauri Windows bundles
         run: npm run tauri build -- --target x86_64-pc-windows-msvc --bundles nsis
 
-      - name: Collect EXE files
+      - name: Collect Windows artifacts
         run: |
           $output = Join-Path $env:RUNNER_TEMP 'cpa-route-control-windows-x64'
           New-Item -ItemType Directory -Path $output -Force | Out-Null
@@ -74,5 +74,66 @@ jobs:
         with:
           name: CPA-Route-Control-windows-x64
           path: ${{ runner.temp }}/cpa-route-control-windows-x64/*.exe
+          if-no-files-found: error
+          retention-days: 30
+
+  build-macos:
+    name: macOS
+    runs-on: macos-latest
+    timeout-minutes: 45
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build Tauri macOS bundles
+        run: npm run tauri build -- --bundles app,dmg
+
+      - name: Collect macOS artifacts
+        run: |
+          output="$RUNNER_TEMP/cpa-route-control-macos"
+          mkdir -p "$output"
+
+          app_dir="src-tauri/target/release/bundle/macos"
+          if [ ! -d "$app_dir" ]; then
+            echo "macOS app bundle was not generated."
+            exit 1
+          fi
+
+          find "$app_dir" -maxdepth 2 -name "*.app" -exec cp -R {} "$output/" \;
+          find "$app_dir" -maxdepth 2 -name "*.dmg" -exec cp {} "$output/" \;
+
+          if [ -z "$(ls -A "$output")" ]; then
+            echo "No macOS artifacts were collected."
+            exit 1
+          fi
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: CPA-Route-Control-macos
+          path: ${{ runner.temp }}/cpa-route-control-macos/*
           if-no-files-found: error
           retention-days: 30
