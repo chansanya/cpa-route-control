@@ -1,0 +1,78 @@
+name: Build Windows EXE
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-windows:
+    name: Windows x64
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build Tauri NSIS installer
+        run: npm run tauri build -- --target x86_64-pc-windows-msvc --bundles nsis
+
+      - name: Collect EXE files
+        run: |
+          $output = Join-Path $env:RUNNER_TEMP 'cpa-route-control-windows-x64'
+          New-Item -ItemType Directory -Path $output -Force | Out-Null
+
+          $portable = 'src-tauri/target/x86_64-pc-windows-msvc/release/cpa-route-control-desktop.exe'
+          if (-not (Test-Path -LiteralPath $portable)) {
+            throw "Portable executable was not generated: $portable"
+          }
+          Copy-Item -LiteralPath $portable -Destination (Join-Path $output 'CPA-Route-Control-portable.exe')
+
+          $installers = Get-ChildItem -Path 'src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis' -Filter '*.exe' -File
+          if ($installers.Count -eq 0) {
+            throw 'NSIS installer was not generated.'
+          }
+          foreach ($installer in $installers) {
+            Copy-Item -LiteralPath $installer.FullName -Destination $output
+          }
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: CPA-Route-Control-windows-x64
+          path: ${{ runner.temp }}/cpa-route-control-windows-x64/*.exe
+          if-no-files-found: error
+          retention-days: 30

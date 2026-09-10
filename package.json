@@ -1,0 +1,23 @@
+{
+  "name": "cpa-route-control-desktop",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "format": "prettier --write src/**/*.{vue,js,css}",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@lucide/vue": "^1.43.0",
+    "@tauri-apps/api": "^2.8.0",
+    "vue": "^3.5.13"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.8.0",
+    "@vitejs/plugin-vue": "^5.2.1",
+    "prettier": "^3.9.6",
+    "vite": "^6.0.5"
+  }
+}

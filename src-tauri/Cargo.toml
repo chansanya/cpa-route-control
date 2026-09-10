@@ -1,0 +1,21 @@
+[package]
+name = "cpa-route-control-desktop"
+version = "0.3.0"
+description = "CPA Route Control desktop client"
+authors = ["CPA Route Control"]
+edition = "2021"
+
+[lib]
+name = "cpa_route_control_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.4", features = [] }
+
+[dependencies]
+tauri = { version = "2.8", features = ["tray-icon"] }
+tauri-plugin-opener = "2.5"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+keyring = { version = "3", features = ["windows-native"] }
