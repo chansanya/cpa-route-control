@@ -366,25 +366,6 @@ function ensureScopeStrategies(scope, credentialsList) {
     }
   }
 
-  if (
-    !existing.some((s) => s.name === "均衡") &&
-    !deletedPresetIds.has(`preset-${scope}-balanced`)
-  ) {
-    strategies.value.push({
-      id: `preset-${scope}-balanced`,
-      alias: scope,
-      name: "均衡",
-      items: credentialsList.map((item) => ({
-        credential_id: item.id,
-        credential_name: item.name || item.account_label || item.id,
-        weight: 1,
-        priority: 0,
-      })),
-      created_at: new Date().toISOString(),
-    });
-    changed = true;
-  }
-
   if (changed) {
     persistStrategies();
   }
@@ -625,7 +606,12 @@ async function deleteAlias(alias) {
 
 function loadStrategies() {
   try {
-    return JSON.parse(localStorage.getItem("cpa-weight-strategies") || "[]");
+    const stored = JSON.parse(
+      localStorage.getItem("cpa-weight-strategies") || "[]",
+    );
+    return Array.isArray(stored)
+      ? stored.filter((item) => item?.name !== "均衡")
+      : [];
   } catch {
     return [];
   }
@@ -667,6 +653,8 @@ function applyConfig(snapshot) {
     draftPriorities[item.id] = item.priority;
   }
   draftDirty.value = false;
+  strategies.value = strategies.value.filter((s) => s.name !== "均衡");
+  persistStrategies();
   ensureAllScopeStrategies();
 }
 
