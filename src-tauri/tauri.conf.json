@@ -11,7 +11,7 @@
   },
   "app": {
     "windows": [{ "title": "CPA Route Control", "width": 1180, "height": 780, "minWidth": 1000, "minHeight": 680, "resizable": true }],
-    "security": { "csp": "default-src 'self' http://127.0.0.1:* http://localhost:*; connect-src 'self' http://127.0.0.1:* http://localhost:* https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:" }
+    "security": { "csp": "default-src 'self' http://127.0.0.1:* http://localhost:*; frame-src 'self' http://127.0.0.1:* http://localhost:* https://cpa.10085.fun; connect-src 'self' http://127.0.0.1:* http://localhost:* https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:" }
   },
   "bundle": {
     "active": true,

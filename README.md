@@ -1,6 +1,6 @@
 # CPA Route Control
 
-直接连接 CLIProxyAPI 官方 Management API 的 Tauri 2 + Vue 3 桌面客户端，不再运行独立的 Route Control Node 服务。
+基于 Tauri 2 + Vue 3 的 CLIProxyAPI 管理客户端，支持模型别名、优先级、权重和快捷策略管理。
 
 ## 本地调试
 
@@ -32,6 +32,15 @@ CPA 明文管理密钥: config.yaml 被 bcrypt 加密前的原始密钥
 一键分配按钮根据 CPA 当前 Provider 动态生成，不绑定固定模型。用户可新增自定义权重策略；策略只保存 Credential 标识、显示名称和 Weight，不保存任何 API Key。若 CPA 删除了策略引用的 Credential，客户端会拒绝应用并提示具体缺失项。
 
 授权文件（OAuth/JSON）与配置型 API Key 会统一显示在权重池中。授权文件使用 CPA 返回的 `auth_index` 作为稳定 ID，写入时按官方要求发送 `PATCH /auth-files/fields`，不会改写授权文件内容。
+
+## 配置远程 CPA 网页注意事项
+
+- 连接时填写管理接口地址，例如 `https://cpa.example.com/v0/management`；内嵌网页访问同一站点的 `/management.html`。
+- 远程 CPA 需启用远程管理，并使用明文管理密钥登录。建议使用 HTTPS，不要将密钥放入 URL。
+- EXE 需要在 `src-tauri/tauri.conf.json` 的 `app.security.csp` 中，将目标站点加入 `frame-src`。当前已配置 `https://cpa.10085.fun`；其他站点需追加对应协议、域名及非默认端口，保留其余安全策略。
+- 修改上述配置后需重新打包并安装新版 EXE。
+- 目标站点需允许网页被嵌入；如果站点限制嵌入，请在外部浏览器访问。
+- 内嵌管理台需单独登录，可使用侧栏复制图标复制当前管理密钥。
 
 ## 桌面安装包
 
