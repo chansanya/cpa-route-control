@@ -9,6 +9,7 @@ import {
   CircleAlert,
   Command,
   Copy,
+  Download,
   ExternalLink,
   Gauge,
   KeyRound,
@@ -40,6 +41,7 @@ import AliasCreatorModal from "./components/AliasCreatorModal.vue";
 import StrategyEditorModal from "./components/StrategyEditorModal.vue";
 
 const appVersion = packageMeta.version;
+const updateInfo = ref(null);
 const client = new CpaManagementClient();
 const page = ref("settings");
 const managementUrl = ref(
@@ -776,6 +778,50 @@ async function copyManagementKey() {
   }
 }
 
+function versionParts(version) {
+  return String(version || "")
+    .replace(/^v/i, "")
+    .split(/[.-]/)
+    .map((part) => Number.parseInt(part, 10) || 0);
+}
+
+function isNewerVersion(latest, current) {
+  const left = versionParts(latest);
+  const right = versionParts(current);
+  const length = Math.max(left.length, right.length);
+  for (let index = 0; index < length; index += 1) {
+    const diff = (left[index] || 0) - (right[index] || 0);
+    if (diff !== 0) return diff > 0;
+  }
+  return false;
+}
+
+async function checkForUpdate() {
+  try {
+    const response = await fetch(
+      "https://api.github.com/repos/chansanya/cpa-route-control/releases/latest",
+    );
+    if (!response.ok) return;
+    const release = await response.json();
+    if (!release?.tag_name) return;
+    if (!isNewerVersion(release.tag_name, `v${appVersion}`)) return;
+    const asset = (release.assets || []).find((item) =>
+      /\.exe$/i.test(item.name),
+    );
+    updateInfo.value = {
+      version: release.tag_name,
+      url: asset?.browser_download_url || release.html_url,
+    };
+  } catch {
+    // GitHub 不可达时静默忽略，不阻塞应用启动。
+  }
+}
+
+function openUpdateDownload() {
+  if (!updateInfo.value?.url) return;
+  window.open(updateInfo.value.url, "_blank", "noopener,noreferrer");
+}
+
 function credentialStatusName(credential) {
   return credential.config_section === "auth-files"
     ? credential.account_label || credential.name
@@ -1181,6 +1227,7 @@ async function deleteStrategy(strategy) {
 
 onUnmounted(() => clearInterval(refreshTimer));
 onMounted(async () => {
+  checkForUpdate();
   if (!desktop) return;
   loading.value = true;
   try {
@@ -1302,6 +1349,15 @@ onMounted(async () => {
           </h1>
         </div>
         <div class="top-actions">
+          <button
+            v-if="updateInfo"
+            class="icon-button update-button"
+            :title="`新版本 ${updateInfo.version}`"
+            aria-label="下载新版本"
+            @click="openUpdateDownload"
+          >
+            <Download :size="17" />
+          </button>
           <button
             v-if="page === 'web'"
             class="icon-button"

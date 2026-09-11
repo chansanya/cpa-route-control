@@ -279,6 +279,13 @@ h3 {
   background: rgba(255, 127, 137, 0.09);
   color: #ff9ba3;
 }
+.update-button {
+  color: var(--lime);
+}
+.update-button:hover {
+  border-color: rgba(215, 248, 123, 0.55);
+  background: rgba(215, 248, 123, 0.09);
+}
 .content {
   animation: rise 0.35s ease both;
 }
