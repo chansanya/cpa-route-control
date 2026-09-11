@@ -47,6 +47,7 @@ function normalize(section, entry, index, group = {}) {
       priority: integer(entry?.priority, integer(group?.priority, 0)),
       weight: integer(entry?.weight, 1),
       enabled: !disabled,
+      disabled,
       models,
       service_url: baseUrl || "默认服务地址",
       account_label: "",
@@ -64,7 +65,7 @@ function normalize(section, entry, index, group = {}) {
   };
 }
 
-export function normalizeConfig(config = {}) {
+export function normalizeConfig(config = {}, { includeDisabled = false } = {}) {
   const rows = [];
   for (const section of SECTIONS)
     array(config[section]).forEach((entry, index) =>
@@ -82,8 +83,11 @@ export function normalizeConfig(config = {}) {
       ),
     );
   });
-  const credentials = rows.map((row) => row.credential);
-  const candidates = rows
+  const selectedRows = includeDisabled
+    ? rows
+    : rows.filter((row) => row.credential.enabled);
+  const credentials = selectedRows.map((row) => row.credential);
+  const candidates = selectedRows
     .flatMap((row) => row.aliases)
     .map((alias) => {
       const credential = credentials.find(
@@ -112,37 +116,47 @@ export function normalizeConfig(config = {}) {
   return { credentials, aliases };
 }
 
-export function normalizeSnapshot(config = {}, authFilesPayload = {}) {
-  const configured = normalizeConfig(config);
-  const runtimeFiles = array(authFilesPayload.files).map((file, index) => ({
-    id: String(
-      file.auth_index ||
-        file.authIndex ||
-        file.id ||
-        file.name ||
-        `auth-file-${index}`,
-    ),
-    name: String(file.label || file.name || file.id || `授权文件 ${index + 1}`),
-    provider: String(file.provider || file.type || "oauth").toLowerCase(),
-    priority: integer(file.priority, 0),
-    weight: integer(file.weight, 1),
-    enabled: file.disabled !== true && file.unavailable !== true,
-    status: String(file.status || ""),
-    source: String(file.source || "file"),
-    config_section: "auth-files",
-    config_index: index,
-    auth_name: String(file.name || file.id || ""),
-    account_label: String(
-      file.email ||
-        file.account ||
-        file.label ||
-        file.id ||
-        file.name ||
-        `授权账号 ${index + 1}`,
-    ),
-    service_url: "",
-    credential_type: "授权文件",
-  }));
+export function normalizeSnapshot(
+  config = {},
+  authFilesPayload = {},
+  { includeDisabled = false } = {},
+) {
+  const configured = normalizeConfig(config, { includeDisabled });
+  const runtimeFiles = array(authFilesPayload.files)
+    .map((file, index) => ({
+      id: String(
+        file.auth_index ||
+          file.authIndex ||
+          file.id ||
+          file.name ||
+          `auth-file-${index}`,
+      ),
+      name: String(
+        file.label || file.name || file.id || `授权文件 ${index + 1}`,
+      ),
+      provider: String(file.provider || file.type || "oauth").toLowerCase(),
+      priority: integer(file.priority, 0),
+      weight: integer(file.weight, 1),
+      enabled: file.disabled !== true && file.unavailable !== true,
+      disabled: file.disabled === true,
+      unavailable: file.unavailable === true,
+      status: String(file.status || ""),
+      source: String(file.source || "file"),
+      config_section: "auth-files",
+      config_index: index,
+      auth_name: String(file.name || file.id || ""),
+      account_label: String(
+        file.email ||
+          file.account ||
+          file.label ||
+          file.id ||
+          file.name ||
+          `授权账号 ${index + 1}`,
+      ),
+      service_url: "",
+      credential_type: "授权文件",
+    }))
+    .filter((file) => includeDisabled || file.enabled);
   const credentials = configured.credentials.map((item) => ({
     ...item,
     credential_type: "配置 Key",

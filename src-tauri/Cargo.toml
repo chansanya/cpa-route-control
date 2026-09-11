@@ -1,6 +1,6 @@
 [package]
 name = "cpa-route-control-desktop"
-version = "1.0.1"
+version = "1.0.2"
 description = "CPA Route Control desktop client"
 authors = ["CPA Route Control"]
 edition = "2021"

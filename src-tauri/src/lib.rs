@@ -74,6 +74,22 @@ async fn restore_cpa(base_url: String, state: State<'_, CpaState>) -> Result<Opt
 }
 
 #[tauri::command]
+fn disconnect_cpa(state: State<'_, CpaState>) -> Result<(), String> {
+    let connection = state
+        .connection
+        .lock()
+        .map_err(|_| "CPA connection lock failed")?
+        .take();
+    if let Some(connection) = connection {
+        match credential_entry(&connection.base_url)?.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => {}
+            Err(error) => return Err(format!("删除 CPA 凭据失败: {error}")),
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
 async fn cpa_request(method: String, path: String, body: Option<Value>, state: State<'_, CpaState>) -> Result<Value, String> {
     let connection = state.connection.lock().map_err(|_| "CPA connection lock failed")?.clone().ok_or("请先连接 CPA")?;
     send(&state.client, &connection, &method, &path, body).await
@@ -89,7 +105,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(CpaState { client, connection: Mutex::new(None) })
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![connect_cpa, restore_cpa, cpa_request])
+        .invoke_handler(tauri::generate_handler![connect_cpa, restore_cpa, disconnect_cpa, cpa_request])
         .run(tauri::generate_context!())
         .expect("error while running CPA Route Control");
 }

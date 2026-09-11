@@ -11,6 +11,14 @@ export default defineConfig({
         target: process.env.CPA_DEV_TARGET || 'http://127.0.0.1:8317',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/cpa-management/, '/v0/management')
+      },
+      '/management.html': {
+        target: process.env.CPA_DEV_TARGET || 'http://127.0.0.1:8317',
+        changeOrigin: true
+      },
+      '/v0/management': {
+        target: process.env.CPA_DEV_TARGET || 'http://127.0.0.1:8317',
+        changeOrigin: true
       }
     }
   }

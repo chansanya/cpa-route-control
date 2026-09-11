@@ -8,10 +8,13 @@ import {
   ChevronDown,
   CircleAlert,
   Command,
+  Copy,
+  ExternalLink,
   Gauge,
   KeyRound,
   LayoutDashboard,
   LockKeyhole,
+  LogOut,
   Plus,
   RefreshCw,
   Route,
@@ -28,13 +31,26 @@ import {
 } from "@lucide/vue";
 import { CpaManagementClient, DEFAULT_MANAGEMENT_URL, isTauri } from "./api";
 import { normalizeSnapshot } from "./cpa-config";
+import packageMeta from "../package.json";
+import ConfirmDialog from "./components/ConfirmDialog.vue";
+import ConnectionPanel from "./components/ConnectionPanel.vue";
+import CpaWebPanel from "./components/CpaWebPanel.vue";
+import CredentialStatusModal from "./components/CredentialStatusModal.vue";
+import AliasCreatorModal from "./components/AliasCreatorModal.vue";
+import StrategyEditorModal from "./components/StrategyEditorModal.vue";
 
+const appVersion = packageMeta.version;
 const client = new CpaManagementClient();
 const page = ref("settings");
 const managementUrl = ref(
   localStorage.getItem("cpa-management-url") || DEFAULT_MANAGEMENT_URL,
 );
 const desktop = isTauri();
+const cpaWebUrl = computed(() =>
+  desktop
+    ? `${new URL(managementUrl.value).origin}/management.html`
+    : "/management.html",
+);
 const rememberedBrowserKey = desktop
   ? ""
   : sessionStorage.getItem("cpa-management-key") || "";
@@ -46,6 +62,9 @@ const notice = ref(null);
 const confirmDialog = ref(null);
 let confirmResolver;
 const credentials = ref([]);
+const manageableCredentials = ref([]);
+const showCredentialStatus = ref(false);
+const credentialStatusTab = ref("providers");
 const aliases = ref([]);
 const customAliasNames = ref(loadCustomAliasNames());
 const showAliasCreator = ref(false);
@@ -63,6 +82,7 @@ const strategies = ref(loadStrategies());
 let refreshTimer;
 
 const selectedAliasName = ref("code");
+const aliasPageTab = ref("strategy");
 const allAliases = computed(() => {
   const byName = new Map(aliases.value.map((item) => [item.alias, item]));
   for (const alias of customAliasNames.value) {
@@ -134,6 +154,24 @@ const aliasCredentialGroup = computed(() => ({
 const authFileCredentials = computed(() =>
   credentials.value.filter((item) => item.config_section === "auth-files"),
 );
+const providerStatusCredentials = computed(() => {
+  const groups = new Map();
+  for (const credential of manageableCredentials.value.filter(
+    (item) => item.config_section !== "auth-files",
+  )) {
+    const key =
+      credential.config_section === "openai-compatibility"
+        ? `${credential.config_section}-${Math.floor(credential.config_index / 10000)}`
+        : credential.id;
+    if (!groups.has(key)) groups.set(key, credential);
+  }
+  return [...groups.values()];
+});
+const authStatusCredentials = computed(() =>
+  manageableCredentials.value.filter(
+    (item) => item.config_section === "auth-files",
+  ),
+);
 const routeKeyOf = (item) =>
   `${Number(item?.priority) || 0}:${Number(item?.weight) || 0}`;
 function routeWinner(items) {
@@ -155,52 +193,35 @@ function isRouteActive(item, route) {
     ? routeKeyOf(item) === routeKeyOf(route.item)
     : item.id === route.item.id;
 }
-const aliasRouteSummaries = computed(() =>
-  allAliases.value.map((alias) => {
-    const candidates = (alias?.candidates || []).filter(
-      (candidate) => candidate.enabled !== false,
-    );
-    if (!candidates.length)
-      return {
-        alias: alias.alias,
-        provider: "未绑定供应商",
-        model: alias.target_model || "未配置模型",
-        tie: false,
-      };
-    const sorted = [...candidates].sort(
-      (a, b) =>
-        (Number(b.priority) || 0) - (Number(a.priority) || 0) ||
-        (Number(b.weight) || 0) - (Number(a.weight) || 0),
-    );
-    const top = sorted[0];
-    const credential = credentials.value.find(
-      (item) => item.id === top.credential_id,
-    );
-    const tie =
-      sorted.filter((candidate) => routeKeyOf(candidate) === routeKeyOf(top))
-        .length > 1;
-    return {
-      alias: alias.alias,
-      provider: credential?.service_url || top.provider || "默认服务地址",
-      model: top.target_model || alias.target_model || "未配置模型",
-      tie,
-    };
-  }),
-);
 const authRouteSummary = computed(() => {
   const route = routeWinner(authFileCredentials.value);
   const item = route.item;
   return {
     ...route,
-    label: item ? item.account_label || item.name : "未绑定授权文件",
-    provider: item?.provider || "—",
+    label: item ? item.account_label || item.name : "暂无可用账号",
   };
+});
+const currentAuthAccountName = computed(() => {
+  const label = authRouteSummary.value.label;
+  return label.includes("@") ? label.slice(0, label.indexOf("@")) : label;
 });
 const aliasActiveRoute = computed(() =>
   routeWinner(aliasCredentialGroup.value.items),
 );
 const authActiveRoute = computed(() => routeWinner(authFileCredentials.value));
 const aliasSearch = ref("");
+const expandedCandidateProviders = reactive({});
+
+function toggleCandidateProvider(credentialId) {
+  expandedCandidateProviders[credentialId] =
+    !expandedCandidateProviders[credentialId];
+}
+
+function collapseCandidateProviders() {
+  for (const credentialId of Object.keys(expandedCandidateProviders)) {
+    delete expandedCandidateProviders[credentialId];
+  }
+}
 
 const boundAliasProviderGroups = computed(() => {
   const currentAlias = selectedAliasName.value;
@@ -388,6 +409,8 @@ function ensureAllScopeStrategies() {
 function selectAlias(alias) {
   selectedAliasName.value = typeof alias === "string" ? alias : alias.alias;
   aliasSearch.value = "";
+  aliasPageTab.value = "strategy";
+  collapseCandidateProviders();
   showStrategyEditor.value = false;
   page.value = "alias";
   ensureScopeStrategies(
@@ -646,7 +669,11 @@ function resolveConfirm(value) {
 
 function applyConfig(snapshot) {
   const normalized = normalizeSnapshot(snapshot.config, snapshot.authFiles);
+  const manageable = normalizeSnapshot(snapshot.config, snapshot.authFiles, {
+    includeDisabled: true,
+  });
   credentials.value = normalized.credentials;
+  manageableCredentials.value = manageable.credentials;
   aliases.value = normalized.aliases;
   for (const item of normalized.credentials) {
     draftWeights[item.id] = item.weight;
@@ -659,7 +686,7 @@ function applyConfig(snapshot) {
 }
 
 async function connect() {
-  if (!managementKey.value) return flash("error", "请输入 CPA 明文管理密钥");
+  if (!managementKey.value) return flash("error", "请输入 管理密钥");
   loading.value = true;
   try {
     await client.connect(
@@ -685,6 +712,97 @@ async function connect() {
     );
   } catch (error) {
     connected.value = false;
+    flash("error", error.message);
+  } finally {
+    loading.value = false;
+  }
+}
+
+async function disconnect() {
+  if (
+    !(await askConfirm({
+      title: "退出连接",
+      message: draftDirty.value
+        ? "退出并丢弃未保存修改？"
+        : "退出当前 CPA 连接？",
+      confirmLabel: "确认退出",
+      danger: true,
+    }))
+  )
+    return;
+
+  loading.value = true;
+  try {
+    await client.disconnect();
+    clearInterval(refreshTimer);
+    refreshTimer = undefined;
+    sessionStorage.removeItem("cpa-management-key");
+    managementKey.value = "";
+    rememberKey.value = false;
+    connected.value = false;
+    credentials.value = [];
+    manageableCredentials.value = [];
+    showCredentialStatus.value = false;
+    aliases.value = [];
+    selectedAliasName.value = "";
+    selectedStrategyId.value = null;
+    draftDirty.value = false;
+    for (const key of Object.keys(draftWeights)) delete draftWeights[key];
+    for (const key of Object.keys(draftPriorities)) delete draftPriorities[key];
+    page.value = "settings";
+    flash("success", "已退出 CPA 连接");
+  } catch (error) {
+    flash("error", error.message);
+  } finally {
+    loading.value = false;
+  }
+}
+
+function openCpaWeb() {
+  if (desktop) {
+    window.open(cpaWebUrl.value, "_blank", "noopener,noreferrer");
+    return;
+  }
+  window.open(cpaWebUrl.value, "_blank");
+}
+
+async function copyManagementKey() {
+  if (!managementKey.value) return;
+  try {
+    await navigator.clipboard.writeText(managementKey.value);
+    flash("success", "管理密钥已复制");
+  } catch {
+    flash("error", "复制失败，请手动输入管理密钥");
+  }
+}
+
+function credentialStatusName(credential) {
+  return credential.config_section === "auth-files"
+    ? credential.account_label || credential.name
+    : credential.service_url || credential.name;
+}
+
+async function toggleCredentialEnabled(credential) {
+  if (credential.unavailable && !credential.disabled) {
+    return flash("error", "该授权文件当前不可用，无法手动启用");
+  }
+  const enabled = credential.enabled === false;
+  const action = enabled ? "启用" : "禁用";
+  if (
+    !(await askConfirm({
+      title: `${action}凭据`,
+      message: `${action}「${credentialStatusName(credential)}」？`,
+      confirmLabel: `确认${action}`,
+      danger: !enabled,
+    }))
+  )
+    return;
+
+  loading.value = true;
+  try {
+    applyConfig(await client.setCredentialEnabled(credential, enabled));
+    flash("success", `已${action}「${credentialStatusName(credential)}」`);
+  } catch (error) {
     flash("error", error.message);
   } finally {
     loading.value = false;
@@ -1090,11 +1208,21 @@ onMounted(async () => {
         <div><strong>CPA</strong><span>DIRECT CONTROL</span></div>
       </div>
       <div class="instance">
-        <button class="instance-button">
-          <span class="status-dot" :class="{ offline: !connected }"></span
-          >{{ connected ? "CPA 已连接" : "CPA 未连接"
-          }}<ChevronDown :size="14" />
-        </button>
+        <div class="instance-button">
+          <span class="status-dot" :class="{ offline: !connected }"></span>
+          <span class="instance-status-text">{{
+            connected ? "CPA 已连接" : "CPA 未连接"
+          }}</span>
+          <button
+            v-if="connected && page === 'web'"
+            class="instance-copy"
+            title="复制管理密钥"
+            aria-label="复制管理密钥"
+            @click="copyManagementKey"
+          >
+            <Copy :size="14" />
+          </button>
+        </div>
         <div class="instance-url">
           {{ managementUrl.replace(/^https?:\/\//, "") }}
         </div>
@@ -1114,6 +1242,14 @@ onMounted(async () => {
               class="nav-arrow"
             />
           </button>
+          <button
+            class="nav-item"
+            :class="{ active: page === 'web' }"
+            @click="page = 'web'"
+          >
+            <ExternalLink :size="17" /><span>CPA 网站</span
+            ><ArrowUpRight v-if="page === 'web'" :size="14" class="nav-arrow" />
+          </button>
         </template>
         <template v-else>
           <div class="nav-label">CONNECT</div>
@@ -1128,12 +1264,14 @@ onMounted(async () => {
           ><span>OFFICIAL API</span
           ><b>{{ connected ? "ONLINE" : "OFFLINE" }}</b>
         </div>
-        <div class="version">DIRECT CLIENT <span>v0.3.0</span></div>
+        <div class="version">
+          DIRECT CLIENT <span>v{{ appVersion }}</span>
+        </div>
       </div>
     </aside>
 
-    <main class="main">
-      <header class="topbar">
+    <main class="main" :class="{ 'web-shell': page === 'web' }">
+      <header v-if="page !== 'web'" class="topbar">
         <div>
           <div class="breadcrumb">
             CLI PROXY API <span>/</span>
@@ -1141,10 +1279,12 @@ onMounted(async () => {
               page === "dashboard"
                 ? "DASHBOARD"
                 : page === "alias"
-                  ? `ALIAS · ${selectedAliasName.value}`
+                  ? `ALIAS · ${selectedAliasName}`
                   : page === "auth"
                     ? "AUTH FILES"
-                    : "SETTINGS"
+                    : page === "web"
+                      ? "CPA WEB"
+                      : "SETTINGS"
             }}
           </div>
           <h1>
@@ -1155,24 +1295,47 @@ onMounted(async () => {
                   ? `权重控制`
                   : page === "auth"
                     ? "授权文件权重"
-                    : "连接 CPA"
+                    : page === "web"
+                      ? "CPA 网站"
+                      : "连接 CPA"
             }}
           </h1>
         </div>
         <div class="top-actions">
+          <button
+            v-if="page === 'web'"
+            class="icon-button"
+            @click="openCpaWeb"
+            title="在系统浏览器打开"
+          >
+            <ExternalLink :size="17" />
+          </button>
+          <button
+            v-if="connected"
+            class="icon-button"
+            @click="showCredentialStatus = true"
+            title="启用状态"
+            aria-label="管理供应商和授权文件启用状态"
+          >
+            <SlidersHorizontal :size="17" />
+          </button>
           <button
             class="icon-button"
             :disabled="!connected"
             @click="refresh()"
             title="从 CPA 刷新"
           >
-            <RefreshCw :size="17" :class="{ spin: loading }" /></button
-          ><button
-            class="avatar"
-            :title="connected ? 'CPA 已连接' : '连接 CPA'"
-            @click="!connected && (page = 'settings')"
+            <RefreshCw :size="17" :class="{ spin: loading }" />
+          </button>
+          <button
+            v-if="connected"
+            class="icon-button logout-icon"
+            :disabled="loading"
+            @click="disconnect"
+            title="退出连接"
+            aria-label="退出连接"
           >
-            CPA
+            <LogOut :size="17" />
           </button>
         </div>
       </header>
@@ -1183,219 +1346,67 @@ onMounted(async () => {
         />{{ notice.message
         }}<button @click="notice = null"><X :size="14" /></button>
       </div>
-      <div
-        v-if="confirmDialog"
-        class="modal-backdrop"
-        @click.self="resolveConfirm(false)"
-      >
-        <section
-          class="confirm-modal"
-          :class="{ danger: confirmDialog.danger }"
-          role="dialog"
-          aria-modal="true"
-        >
-          <button
-            class="modal-close"
-            aria-label="关闭"
-            @click="resolveConfirm(false)"
-          >
-            <X :size="16" />
-          </button>
-          <div class="modal-icon"><CircleAlert :size="21" /></div>
-          <h3>{{ confirmDialog.title }}</h3>
-          <p>{{ confirmDialog.message }}</p>
-          <div class="modal-actions">
-            <button class="secondary" @click="resolveConfirm(false)">
-              取消</button
-            ><button
-              :class="['modal-confirm', { danger: confirmDialog.danger }]"
-              @click="resolveConfirm(true)"
-            >
-              {{ confirmDialog.confirmLabel }}
-            </button>
-          </div>
-        </section>
-      </div>
-      <div
+      <ConfirmDialog
+        :confirm-dialog="confirmDialog"
+        @close="resolveConfirm(false)"
+        @confirm="resolveConfirm(true)"
+      />
+      <StrategyEditorModal
         v-if="showStrategyEditor"
-        class="modal-backdrop"
-        @click.self="showStrategyEditor = false"
-      >
-        <section class="strategy-modal" role="dialog" aria-modal="true">
-          <button
-            class="modal-close"
-            aria-label="关闭"
-            @click="showStrategyEditor = false"
-          >
-            <X :size="16" />
-          </button>
-          <div class="strategy-modal-head">
-            <div class="modal-icon"><Save :size="20" /></div>
-            <div>
-              <h3>
-                {{ editingStrategyId ? "编辑" : "新增" }}
-                {{ strategyScopeLabel }} 策略
-              </h3>
-            </div>
-          </div>
-          <label class="strategy-name"
-            >策略名称<input
-              v-model="strategyName"
-              placeholder="例如：工作日下午"
-              maxlength="40"
-          /></label>
-          <div class="strategy-list">
-            <div
-              v-for="group in strategyCredentialGroups"
-              :key="group.id"
-              class="strategy-group"
-            >
-              <div class="strategy-group-title">
-                <span>{{ group.title }}</span
-                ><b>{{ group.items.length }}</b>
-              </div>
-              <div
-                v-for="item in group.items"
-                :key="item.id"
-                class="strategy-weight"
-              >
-                <div class="strategy-credential">
-                  <span>{{ item.name }}</span
-                  ><small>{{ item.provider }}</small>
-                </div>
-                <div class="strategy-fields">
-                  <label
-                    ><small>优先级</small
-                    ><input
-                      v-model.number="strategyPriorities[item.id]"
-                      type="number"
-                      step="1" /></label
-                  ><label
-                    ><small>权重</small
-                    ><input
-                      v-model.number="strategyWeights[item.id]"
-                      type="number"
-                      min="0"
-                      max="1000000"
-                      step="1"
-                  /></label>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div class="modal-actions">
-            <button
-              v-if="editingStrategyId"
-              class="secondary danger-btn"
-              @click="deleteEditingStrategy"
-            >
-              <Trash2 :size="14" />删除策略</button
-            ><button class="secondary" @click="showStrategyEditor = false">
-              取消</button
-            ><button class="modal-confirm" @click="saveStrategy">
-              {{ editingStrategyId ? "保存修改" : "保存策略"
-              }}<ArrowUpRight :size="14" />
-            </button>
-          </div>
-        </section>
-      </div>
+        :editing-strategy-id="editingStrategyId"
+        :strategy-scope-label="strategyScopeLabel"
+        :strategy-name="strategyName"
+        :strategy-credential-groups="strategyCredentialGroups"
+        :strategy-priorities="strategyPriorities"
+        :strategy-weights="strategyWeights"
+        @close="showStrategyEditor = false"
+        @delete="deleteEditingStrategy"
+        @save="saveStrategy"
+        @update:strategy-name="strategyName = $event"
+        @update:priority="
+          (id, value) =>
+            (strategyPriorities[id] = value === '' ? '' : Number(value))
+        "
+        @update:weight="
+          (id, value) =>
+            (strategyWeights[id] = value === '' ? '' : Number(value))
+        "
+      />
 
-      <div
+      <AliasCreatorModal
         v-if="showAliasCreator"
-        class="modal-backdrop"
-        @click.self="showAliasCreator = false"
-      >
-        <section class="alias-creator-modal" role="dialog" aria-modal="true">
-          <button
-            class="modal-close"
-            aria-label="关闭"
-            @click="showAliasCreator = false"
-          >
-            <X :size="16" />
-          </button>
-          <div class="modal-icon"><Plus :size="20" /></div>
-          <h3>新增模型别名</h3>
-          <label class="alias-creator-field">
-            模型别名
-            <input
-              v-model="newAliasName"
-              autofocus
-              maxlength="48"
-              placeholder="例如：fast-code"
-              @keyup.enter="createAlias"
-            />
-          </label>
-          <div class="modal-actions">
-            <button class="secondary" @click="showAliasCreator = false">
-              取消
-            </button>
-            <button class="modal-confirm" @click="createAlias">
-              创建并编辑<ArrowUpRight :size="14" />
-            </button>
-          </div>
-        </section>
-      </div>
+        :new-alias-name="newAliasName"
+        @close="showAliasCreator = false"
+        @update:new-alias-name="newAliasName = $event"
+        @create="createAlias"
+      />
 
-      <section v-if="page === 'settings'" class="content connection-page">
-        <div class="connection-layout">
-          <div class="connection-visual">
-            <div class="connection-orbit">
-              <Route :size="34" />
-            </div>
-            <h3>少一层服务，<br />少一处故障。</h3>
-            <div class="connection-points">
-              <div><ShieldCheck :size="16" /><span>官方配置热重载</span></div>
-              <div>
-                <LockKeyhole :size="16" /><span>Windows 凭据保险库</span>
-              </div>
-              <div><RefreshCw :size="16" /><span>10 秒实时同步</span></div>
-            </div>
-          </div>
-          <div class="panel settings-panel direct-settings">
-            <div class="form-heading">
-              <span class="form-icon"><KeyRound :size="18" /></span>
-              <div>
-                <h3>Management 通行证</h3>
-              </div>
-            </div>
-            <label
-              >CPA Management URL<input
-                v-model="managementUrl"
-                spellcheck="false" /></label
-            ><label
-              >CPA 明文管理密钥<input
-                v-model="managementKey"
-                type="password"
-                placeholder="不要填写 $2a$ 开头的 bcrypt 哈希"
-                @keyup.enter="connect" /></label
-            ><label class="remember-row"
-              ><input v-model="rememberKey" type="checkbox" /><span
-                >记住密钥</span
-              ><small>{{
-                desktop
-                  ? "保存到 Windows Credential Manager"
-                  : "仅当前浏览器会话"
-              }}</small></label
-            ><button
-              class="connect-button"
-              :disabled="loading || !managementKey"
-              @click="connect"
-            >
-              <span class="connect-button-icon"><Wifi :size="16" /></span
-              ><strong>{{ loading ? "连接中…" : "连接 CPA" }}</strong
-              ><ArrowUpRight :size="16" />
-            </button>
-          </div>
-        </div>
-      </section>
+      <CredentialStatusModal
+        v-if="showCredentialStatus"
+        :provider-status-credentials="providerStatusCredentials"
+        :auth-status-credentials="authStatusCredentials"
+        :credential-status-tab="credentialStatusTab"
+        :loading="loading"
+        :status-name="credentialStatusName"
+        @close="showCredentialStatus = false"
+        @update:tab="credentialStatusTab = $event"
+        @toggle="toggleCredentialEnabled"
+      />
+
+      <ConnectionPanel
+        v-if="page === 'settings'"
+        :management-url="managementUrl"
+        :management-key="managementKey"
+        :remember-key="rememberKey"
+        :desktop="desktop"
+        :loading="loading"
+        @update:management-url="managementUrl = $event"
+        @update:management-key="managementKey = $event"
+        @update:remember-key="rememberKey = $event"
+        @connect="connect"
+      />
 
       <section v-else-if="page === 'dashboard'" class="content dashboard">
-        <div class="sync-banner">
-          <Wifi :size="15" /><span
-            ><b>OFFICIAL API</b> 数据直接来自 GET /v0/management/config，每 10
-            秒自动刷新。</span
-          ><time>{{ credentials.length }} CREDENTIALS</time>
-        </div>
         <div class="hero-grid">
           <div class="hero-card alias-overview-card">
             <section class="entry-group alias-entry-group">
@@ -1441,53 +1452,20 @@ onMounted(async () => {
                 title="授权文件不参与模型别名，独立管理优先级 / 权重"
                 @click="selectAuthFiles"
               >
-                <span>授权文件</span
-                ><small>{{ authFileCredentials.length }} 个账号</small>
+                <span>授权文件</span>
+                <small :title="authRouteSummary.label">{{
+                  currentAuthAccountName
+                }}</small>
+                <b class="auth-count-badge" title="授权文件账号数量">{{
+                  authFileCredentials.length
+                }}</b>
               </button>
             </section>
-          </div>
-          <div class="health-card">
-            <div class="card-head">
-              <span>CPA 状态</span
-              ><span class="health-pill"><Wifi :size="13" />ONLINE</span>
-            </div>
-            <div class="health-value">直连正常</div>
-            <div class="status-route-info">
-              <div class="route-summary-list">
-                <div
-                  v-for="summary in aliasRouteSummaries"
-                  :key="summary.alias"
-                  class="route-summary-row"
-                >
-                  <span class="route-alias">{{ summary.alias }}</span
-                  ><span class="route-provider" :title="summary.provider">{{
-                    summary.provider
-                  }}</span
-                  ><span class="route-model" :title="summary.model">{{
-                    summary.model
-                  }}</span
-                  ><span v-if="summary.tie" class="route-tie">轮询</span>
-                </div>
-                <div class="route-summary-row auth-summary-row">
-                  <span class="route-alias">授权文件</span
-                  ><span
-                    class="route-provider"
-                    :title="authRouteSummary.provider"
-                    >{{ authRouteSummary.provider }}</span
-                  ><span class="route-model" :title="authRouteSummary.label">{{
-                    authRouteSummary.label
-                  }}</span
-                  ><span v-if="authRouteSummary.tie" class="route-tie"
-                    >轮询</span
-                  >
-                </div>
-              </div>
-            </div>
           </div>
         </div>
         <div class="section-head">
           <div>
-            <h2>路由参数</h2>
+            <h2>权重分布</h2>
           </div>
           <button class="text-button" @click="refresh()">
             刷新配置 <RefreshCw :size="14" />
@@ -1561,8 +1539,27 @@ onMounted(async () => {
           </button>
         </div>
 
+        <div class="alias-page-tabs" role="tablist" aria-label="别名管理">
+          <button
+            role="tab"
+            :aria-selected="aliasPageTab === 'strategy'"
+            :class="{ active: aliasPageTab === 'strategy' }"
+            @click="aliasPageTab = 'strategy'"
+          >
+            快捷策略
+          </button>
+          <button
+            role="tab"
+            :aria-selected="aliasPageTab === 'models'"
+            :class="{ active: aliasPageTab === 'models' }"
+            @click="aliasPageTab = 'models'"
+          >
+            模型绑定
+          </button>
+        </div>
+
         <div class="alias-two-col">
-          <div class="alias-col-weights">
+          <div v-if="aliasPageTab === 'strategy'" class="alias-col-weights">
             <div class="alias-quick panel">
               <div class="panel-head">
                 <div>
@@ -1664,7 +1661,7 @@ onMounted(async () => {
             </div>
           </div>
 
-          <div class="alias-col-models">
+          <div v-else class="alias-col-models">
             <!-- 已绑定供应商与模型 (按供应商分类) -->
             <div class="alias-models panel current-models-card">
               <div class="panel-head">
@@ -1755,7 +1752,13 @@ onMounted(async () => {
                   :key="group.credential.id"
                   class="provider-binding-card candidate-card"
                 >
-                  <div class="provider-binding-head">
+                  <button
+                    class="provider-binding-head candidate-provider-toggle"
+                    :aria-expanded="
+                      Boolean(expandedCandidateProviders[group.credential.id])
+                    "
+                    @click="toggleCandidateProvider(group.credential.id)"
+                  >
                     <div class="provider-info">
                       <span class="provider-dot" :class="group.provider"></span>
                       <strong :title="group.service_url">{{
@@ -1763,11 +1766,23 @@ onMounted(async () => {
                       }}</strong>
                       <span class="provider-chip">{{ group.provider }}</span>
                     </div>
-                    <span class="model-count-hint"
-                      >{{ group.models.length }} 个可选模型</span
-                    >
-                  </div>
-                  <div class="provider-models-list">
+                    <span class="candidate-toggle-meta">
+                      <span class="model-count-hint"
+                        >{{ group.models.length }} 个模型</span
+                      >
+                      <ChevronDown
+                        :size="15"
+                        :class="{
+                          expanded:
+                            expandedCandidateProviders[group.credential.id],
+                        }"
+                      />
+                    </span>
+                  </button>
+                  <div
+                    v-if="expandedCandidateProviders[group.credential.id]"
+                    class="provider-models-list"
+                  >
                     <div
                       v-for="model in group.models"
                       :key="model.name"
@@ -1900,6 +1915,7 @@ onMounted(async () => {
           </button>
         </div>
       </section>
+      <CpaWebPanel v-else-if="page === 'web'" :cpa-web-url="cpaWebUrl" />
     </main>
   </div>
 </template>

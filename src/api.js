@@ -30,6 +30,11 @@ export class CpaManagementClient {
     return invoke("restore_cpa", { baseUrl: this.baseUrl });
   }
 
+  async disconnect() {
+    if (isTauri()) await invoke("disconnect_cpa");
+    this.managementKey = "";
+  }
+
   async request(path, { method = "GET", body } = {}) {
     if (isTauri())
       return invoke("cpa_request", { method, path, body: body ?? null });
@@ -141,6 +146,47 @@ export class CpaManagementClient {
   }
   setPriorities(credentials, items) {
     return this.updateCredentials(credentials, "priority", items);
+  }
+
+  async setCredentialEnabled(credential, enabled) {
+    if (credential.config_section === "auth-files") {
+      await this.request("/auth-files/status", {
+        method: "PATCH",
+        body: { name: credential.auth_name, disabled: !enabled },
+      });
+      return this.snapshot();
+    }
+
+    const section = credential.config_section;
+    const payload = await this.request(`/${section}`);
+    const items = payload[section] || payload.items || payload;
+    if (!Array.isArray(items)) {
+      throw new Error(`CPA 返回的 ${section} 不是数组`);
+    }
+
+    if (section === "openai-compatibility") {
+      const groupIndex = Math.floor(credential.config_index / 10000);
+      const group = items[groupIndex];
+      if (!group) {
+        throw new Error(`openai-compatibility[${groupIndex}] 不存在`);
+      }
+      group.disabled = !enabled;
+    } else {
+      const current = items[credential.config_index];
+      if (!current) {
+        throw new Error(`${section}[${credential.config_index}] 不存在`);
+      }
+      if ("disabled" in current) current.disabled = !enabled;
+      const excludedModels = Array.isArray(current["excluded-models"])
+        ? current["excluded-models"]
+        : [];
+      current["excluded-models"] = enabled
+        ? excludedModels.filter((model) => model !== "*")
+        : [...new Set([...excludedModels, "*"])];
+    }
+
+    await this.request(`/${section}`, { method: "PUT", body: items });
+    return this.snapshot();
   }
 
   async updateModelAlias(credential, modelName, alias, resetRouting = false) {

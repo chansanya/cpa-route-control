@@ -39,6 +39,20 @@ body::before {
 .content {
   max-width: 1240px;
 }
+.main.web-shell {
+  padding: 0;
+  height: 100vh;
+  overflow: hidden;
+}
+.main.web-shell .content {
+  max-width: none;
+  width: 100%;
+  height: 100%;
+}
+.main.web-shell .web-page,
+.main.web-shell .web-frame-panel {
+  height: 100%;
+}
 .topbar {
   max-width: 1240px;
 }
@@ -71,17 +85,6 @@ body::before {
 .primary {
   min-height: 40px;
   box-shadow: 0 8px 30px rgba(215, 248, 123, 0.1);
-}
-
-.sync-banner {
-  margin: 0 0 16px;
-  min-height: 42px;
-  border-color: rgba(130, 232, 213, 0.24);
-  background: linear-gradient(
-    90deg,
-    rgba(130, 232, 213, 0.08),
-    rgba(130, 232, 213, 0.025)
-  );
 }
 
 .weight-card {
@@ -598,13 +601,14 @@ body::before {
 }
 
 .connection-layout {
-  display: grid;
-  grid-template-columns: minmax(330px, 0.82fr) minmax(430px, 1.18fr);
-  gap: 16px;
-  max-width: 1040px;
+  display: flex;
+  justify-content: center;
+  width: 100%;
 }
 
 .connection-page {
+  display: flex;
+  justify-content: center;
   padding-top: 8px;
 }
 
@@ -692,8 +696,8 @@ body::before {
 }
 
 .direct-settings {
+  width: min(520px, 100%);
   max-width: none;
-  min-height: 430px;
   padding: 28px 34px;
   display: flex;
   justify-content: center;
@@ -761,14 +765,14 @@ body::before {
 }
 
 .connect-button {
-  width: 100%;
-  min-height: 40px;
-  display: grid;
-  grid-template-columns: 24px 1fr 18px;
+  width: 180px;
+  min-height: 38px;
+  display: flex;
   align-items: center;
-  gap: 8px;
-  margin-top: 8px;
-  padding: 4px 8px 4px 6px;
+  justify-content: center;
+  align-self: center;
+  margin: 10px auto 0;
+  padding: 0 18px;
   border: 1px solid rgba(215, 248, 123, 0.65);
   border-radius: 5px;
   background: linear-gradient(100deg, #d7f87b, #b7dc5a);
@@ -790,17 +794,6 @@ body::before {
 }
 .connect-button strong {
   font-size: 12px;
-}
-.connect-button-icon {
-  width: 24px;
-  height: 24px;
-  display: grid;
-  place-items: center;
-  border-radius: 4px;
-  background: rgba(10, 18, 10, 0.09);
-}
-.connect-button svg:last-child {
-  justify-self: end;
 }
 
 .credential-kind {
@@ -1185,6 +1178,9 @@ body::before {
   backdrop-filter: blur(9px);
   animation: fade-in 0.18s ease;
 }
+.confirm-backdrop {
+  z-index: 90;
+}
 .confirm-modal,
 .alias-creator-modal {
   position: relative;
@@ -1233,6 +1229,139 @@ body::before {
 .alias-creator-field input:focus {
   border-color: var(--lime);
   box-shadow: 0 0 0 3px rgba(215, 248, 123, 0.08);
+}
+.credential-status-modal {
+  position: relative;
+  width: min(640px, calc(100vw - 48px));
+  max-height: min(760px, calc(100vh - 48px));
+  overflow-y: auto;
+  padding: 28px;
+  border: 1px solid rgba(130, 232, 213, 0.26);
+  border-radius: 8px;
+  background: linear-gradient(150deg, #151e28, #0c1118);
+  box-shadow: 0 25px 90px rgba(0, 0, 0, 0.5);
+  animation: modal-in 0.22s ease;
+}
+.web-frame-panel {
+  position: relative;
+  height: 100vh;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.web-frame-panel .panel-head {
+  margin-bottom: 14px;
+}
+.cpa-web-frame {
+  flex: 1;
+  width: 100%;
+  border: 0;
+  background: #080d13;
+}
+.credential-status-modal > h3 {
+  margin: 0 0 20px;
+  font-size: 20px;
+}
+.credential-status-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 16px;
+  padding: 4px;
+  border: 1px solid rgba(61, 74, 90, 0.5);
+  border-radius: 5px;
+  background: rgba(8, 13, 20, 0.55);
+}
+.credential-status-tabs button {
+  min-height: 36px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  transition: all 0.18s ease;
+}
+.credential-status-tabs button:hover {
+  color: #e7edf4;
+  background: rgba(255, 255, 255, 0.035);
+}
+.credential-status-tabs button.active {
+  border-color: rgba(215, 248, 123, 0.26);
+  background: rgba(215, 248, 123, 0.1);
+  color: var(--lime);
+}
+.credential-status-groups {
+  display: grid;
+  gap: 22px;
+}
+.credential-status-groups section > h4 {
+  margin: 0 0 10px;
+  color: #dce4ed;
+  font-size: 14px;
+}
+.credential-status-list {
+  display: grid;
+  gap: 7px;
+}
+.credential-status-row {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 52px;
+  padding: 8px 10px;
+  border: 1px solid rgba(61, 74, 90, 0.48);
+  border-radius: 4px;
+  background: rgba(8, 13, 20, 0.4);
+}
+.credential-status-row > div {
+  min-width: 0;
+}
+.credential-status-row strong,
+.credential-status-row small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.credential-status-row strong {
+  color: #e3e9f0;
+  font-size: 12px;
+}
+.credential-status-row small {
+  margin-top: 3px;
+  color: var(--dim);
+  font:
+    9px "DM Mono",
+    monospace;
+  text-transform: uppercase;
+}
+.status-toggle {
+  min-width: 58px;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid rgba(215, 248, 123, 0.28);
+  border-radius: 4px;
+  background: rgba(215, 248, 123, 0.07);
+  color: var(--lime);
+  font-size: 11px;
+}
+.status-toggle.enabled {
+  border-color: rgba(255, 127, 137, 0.26);
+  background: rgba(255, 127, 137, 0.06);
+  color: var(--red);
+}
+.status-toggle:hover:not(:disabled) {
+  filter: brightness(1.2);
+}
+.status-toggle:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 .modal-close {
   position: absolute;
@@ -1583,11 +1712,32 @@ body::before {
   margin-top: 20px;
   padding-top: 18px;
 }
+.dashboard .hero-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
 .auth-file-preset {
+  position: relative;
   border-color: rgba(130, 232, 213, 0.24);
 }
 .auth-file-preset span {
   color: var(--cyan);
+}
+.auth-count-badge {
+  position: absolute;
+  top: 6px;
+  right: 7px;
+  min-width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  padding: 0 5px;
+  border: 1px solid rgba(130, 232, 213, 0.25);
+  border-radius: 9px;
+  background: rgba(130, 232, 213, 0.08);
+  color: var(--cyan);
+  font:
+    9px "DM Mono",
+    monospace;
 }
 
 /* Alias & Auth Page Layout Redesign */
@@ -1653,23 +1803,45 @@ body::before {
   color: var(--lime);
 }
 
+.alias-page-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 22px;
+  padding: 5px;
+  border: 1px solid rgba(61, 74, 90, 0.5);
+  border-radius: 6px;
+  background: rgba(8, 13, 20, 0.55);
+}
+.alias-page-tabs button {
+  min-height: 42px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  transition: all 0.18s ease;
+}
+.alias-page-tabs button:hover {
+  color: #edf2f7;
+  background: rgba(255, 255, 255, 0.035);
+}
+.alias-page-tabs button.active {
+  border-color: rgba(215, 248, 123, 0.28);
+  background: rgba(215, 248, 123, 0.1);
+  color: var(--lime);
+}
+
 .alias-two-col {
-  display: grid;
-  grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.95fr);
-  gap: 24px;
-  align-items: start;
+  display: block;
+  width: 100%;
 }
-@media (max-width: 1080px) {
-  .alias-two-col {
-    grid-template-columns: 1fr;
-  }
-}
-.alias-col-weights {
-  display: grid;
-  gap: 22px;
-}
+.alias-col-weights,
 .alias-col-models {
+  width: 100%;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 22px;
 }
 
@@ -1841,6 +2013,33 @@ body::before {
     10px "DM Mono",
     monospace;
   flex-shrink: 0;
+}
+.candidate-provider-toggle {
+  width: 100%;
+  border: 0;
+  border-bottom-color: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.candidate-provider-toggle:hover {
+  background: rgba(215, 248, 123, 0.055);
+}
+.candidate-provider-toggle[aria-expanded="true"] {
+  border-bottom-color: rgba(61, 74, 90, 0.36);
+}
+.candidate-toggle-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+.candidate-toggle-meta svg {
+  color: var(--muted);
+  transition: transform 0.18s ease;
+}
+.candidate-toggle-meta svg.expanded {
+  transform: rotate(180deg);
 }
 
 .provider-models-list {
@@ -2037,6 +2236,10 @@ body::before {
     monospace;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.auth-page > .alias-quick + .routing-panel {
+  margin-top: 22px;
 }
 
 .auth-layout {
