@@ -1,5 +1,9 @@
 name: Build Desktop Releases
 
+# 触发条件：
+# 1. 手动在 GitHub Actions 页面运行；
+# 2. 推送到 master；
+# 3. 推送 v* 版本标签。
 on:
   workflow_dispatch:
     inputs:
@@ -16,6 +20,7 @@ on:
 permissions:
   contents: read
 
+# 同一分支或标签的构建只保留最新一次，避免并发重复构建。
 concurrency:
   group: desktop-build-${{ github.ref }}
   cancel-in-progress: true
@@ -26,14 +31,17 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 45
 
+    # Windows 任务使用 PowerShell。
     defaults:
       run:
         shell: pwsh
 
     steps:
+      # 拉取当前仓库代码。
       - name: Checkout
         uses: actions/checkout@v4
 
+      # 安装 Node.js 22，后续 Vite 构建依赖它。
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -41,22 +49,27 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
 
+      # 安装 Rust，并指定 Windows x64 目标。
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
 
+      # 缓存 Rust 依赖，加快后续构建。
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
 
+      # 安装前端 npm 依赖。
       - name: Install frontend dependencies
         run: npm ci
 
+      # 使用 Tauri 构建 Windows NSIS 安装包。
       - name: Build Tauri Windows bundles
         run: npm run tauri build -- --target x86_64-pc-windows-msvc --bundles nsis
 
+      # 收集生成的便携 EXE 和安装包，统一放到临时目录。
       - name: Collect Windows artifacts
         run: |
           $output = Join-Path $env:RUNNER_TEMP 'cpa-route-control-windows-x64'
@@ -76,6 +89,7 @@ jobs:
             Copy-Item -LiteralPath $installer.FullName -Destination $output
           }
 
+      # 将 EXE 产物上传到 Actions Artifacts，供后续发布步骤下载。
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -84,103 +98,43 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-  build-macos:
-    name: macOS
-    runs-on: macos-latest
-    timeout-minutes: 45
-
-    defaults:
-      run:
-        shell: bash
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: package-lock.json
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri -> target
-
-      - name: Install frontend dependencies
-        run: npm ci
-
-      - name: Build Tauri macOS bundles
-        run: npm run tauri build -- --bundles app,dmg
-
-      - name: Collect macOS artifacts
-        run: |
-          output="$RUNNER_TEMP/cpa-route-control-macos"
-          mkdir -p "$output"
-
-          app_dir="src-tauri/target/release/bundle/macos"
-          if [ ! -d "$app_dir" ]; then
-            echo "macOS app bundle was not generated."
-            exit 1
-          fi
-
-          app_name="$(find "$app_dir" -maxdepth 1 -name "*.app" -print -quit)"
-          if [ -n "$app_name" ]; then
-            (
-              cd "$app_dir"
-              zip -qr "$output/CPA-Route-Control-macos.app.zip" "$(basename "$app_name")"
-            )
-          fi
-
-          find "$app_dir" -maxdepth 1 -name "*.dmg" -exec cp {} "$output/" \;
-
-          if [ -z "$(ls -A "$output")" ]; then
-            echo "No macOS artifacts were collected."
-            exit 1
-          fi
-
-      - name: Upload macOS artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: CPA-Route-Control-macos
-          path: ${{ runner.temp }}/cpa-route-control-macos/*
-          if-no-files-found: error
-          retention-days: 30
-
   publish-release:
     name: Publish GitHub Release
-    needs: [build-windows, build-macos]
+    needs: [build-windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
 
     steps:
+      # 拉取代码，用于读取 package.json 版本号。
       - name: Checkout
         uses: actions/checkout@v4
 
+      # 下载上一步上传的 Windows 产物。
       - name: Download release artifacts
         uses: actions/download-artifact@v4
         with:
           path: release-artifacts
 
+      # 自动确定版本号，然后创建 GitHub Release 并上传 EXE。
       - name: Publish Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # 如果是标签推送，直接用标签作为版本。
           if [ "$GITHUB_REF_TYPE" = "tag" ]; then
             VERSION="$GITHUB_REF_NAME"
+          # 手动运行时如果填写了版本号，则使用填写值。
           elif [ -n "${{ inputs.version }}" ]; then
             VERSION="${{ inputs.version }}"
+          # 否则读取 package.json 自动生成版本号。
           else
             VERSION="v$(node -p "require('./package.json').version")"
           fi
 
           echo "Publishing release: $VERSION"
+
+          # 创建 Release 并上传产物；如果 Release 已存在，则改为上传覆盖文件。
           gh release create "$VERSION" \
             release-artifacts/**/* \
             --repo "$GITHUB_REPOSITORY" \

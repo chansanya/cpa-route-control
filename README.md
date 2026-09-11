@@ -35,21 +35,14 @@ CPA 明文管理密钥: config.yaml 被 bcrypt 加密前的原始密钥
 
 ## 桌面安装包
 
-GitHub Actions 支持 Windows 和 macOS 两个平台的 Tauri 桌面构建：
+GitHub Actions 构建 Windows x64 安装包：
 
-- Windows x64：便携 `.exe` 与 NSIS 安装包；
-- macOS：`.app` 与 `.dmg`。
+- Windows x64：便携 `.exe` 与 NSIS 安装包。
 
-触发方式：在 `Actions → Build Desktop Releases → Run workflow` 手动编译，或推送 `v*` 标签。
+触发方式：推送到 `master` 或推送 `v*` 标签；也可在 Actions 中手动运行。
 
 本地构建：
 
 ```powershell
-# Windows
 npm run tauri build -- --bundles nsis
-```
-
-```bash
-# macOS
-npm run tauri build -- --bundles app,dmg
 ```
