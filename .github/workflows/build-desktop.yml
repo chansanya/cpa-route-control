@@ -129,8 +129,15 @@ jobs:
             exit 1
           fi
 
-          find "$app_dir" -maxdepth 2 -name "*.app" -exec cp -R {} "$output/" \;
-          find "$app_dir" -maxdepth 2 -name "*.dmg" -exec cp {} "$output/" \;
+          app_name="$(find "$app_dir" -maxdepth 1 -name "*.app" -print -quit)"
+          if [ -n "$app_name" ]; then
+            (
+              cd "$app_dir"
+              zip -qr "$output/CPA-Route-Control-macos.app.zip" "$(basename "$app_name")"
+            )
+          fi
+
+          find "$app_dir" -maxdepth 1 -name "*.dmg" -exec cp {} "$output/" \;
 
           if [ -z "$(ls -A "$output")" ]; then
             echo "No macOS artifacts were collected."
