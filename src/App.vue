@@ -1313,26 +1313,25 @@ onMounted(async () => {
           <span class="instance-status-text">{{
             connected ? "CPA 已连接" : "CPA 未连接"
           }}</span>
+        </div>
+        <div v-if="connected" class="instance-actions">
           <button
-            v-if="connected && page === 'web'"
-            class="instance-copy"
+            class="instance-action"
             title="复制管理密钥"
             aria-label="复制管理密钥"
             @click="copyManagementKey"
           >
             <Copy :size="14" />
           </button>
+          <button
+            class="instance-action"
+            title="在系统浏览器打开 CPA 管理后台"
+            aria-label="在系统浏览器打开 CPA 管理后台"
+            @click="openCpaWeb"
+          >
+            <ExternalLink :size="14" />
+          </button>
         </div>
-        <button
-          v-if="connected"
-          class="instance-external"
-          title="在系统浏览器打开 CPA 管理后台"
-          aria-label="在系统浏览器打开 CPA 管理后台"
-          @click="openCpaWeb"
-        >
-          <ExternalLink :size="12" />
-          <span>浏览器打开</span>
-        </button>
       </div>
       <nav>
         <template v-if="connected">
