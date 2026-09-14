@@ -65,6 +65,8 @@ const rememberedBrowserKey = desktop
 const managementKey = ref(rememberedBrowserKey);
 const rememberKey = ref(desktop || Boolean(rememberedBrowserKey));
 const connected = ref(false);
+const reconnecting = ref(false);
+const sessionAvailable = computed(() => connected.value || reconnecting.value);
 const loading = ref(false);
 const notice = ref(null);
 const confirmDialog = ref(null);
@@ -88,6 +90,10 @@ const editingStrategyId = ref(null);
 const selectedStrategyId = ref(null);
 const strategies = ref(loadStrategies());
 let refreshTimer;
+let reconnectTimer;
+let reconnectAttempts = 0;
+let connectionCheckInFlight = false;
+let connectionGeneration = 0;
 let updateTimer;
 
 const selectedAliasName = ref("code");
@@ -694,8 +700,87 @@ function applyConfig(snapshot) {
   ensureAllScopeStrategies();
 }
 
+function errorMessage(error) {
+  if (error instanceof Error) return error.message;
+  return String(error || "连接失败");
+}
+
+function startRefreshTimer() {
+  clearInterval(refreshTimer);
+  refreshTimer = setInterval(() => refresh(true), 10000);
+}
+
+function resetReconnectState() {
+  connectionGeneration += 1;
+  clearTimeout(reconnectTimer);
+  reconnectTimer = undefined;
+  reconnectAttempts = 0;
+  reconnecting.value = false;
+  connectionCheckInFlight = false;
+}
+
+function reconnectDelay() {
+  if (reconnectAttempts === 0) return 1500;
+  return Math.min(2000 * 2 ** Math.min(reconnectAttempts - 1, 4), 30000);
+}
+
+function scheduleReconnect() {
+  clearTimeout(reconnectTimer);
+  reconnectTimer = setTimeout(() => attemptReconnect(), reconnectDelay());
+}
+
+function markConnectionInterrupted(error) {
+  const firstFailure = !reconnecting.value;
+  connected.value = false;
+  reconnecting.value = true;
+  if (firstFailure) {
+    flash("error", `CPA 连接中断，正在自动重连：${errorMessage(error)}`);
+  }
+  scheduleReconnect();
+}
+
+async function attemptReconnect(manual = false) {
+  if (!sessionAvailable.value) return;
+  if (connectionCheckInFlight) {
+    if (!reconnectTimer) scheduleReconnect();
+    return;
+  }
+
+  clearTimeout(reconnectTimer);
+  reconnectTimer = undefined;
+  const generation = connectionGeneration;
+  connectionCheckInFlight = true;
+  if (manual) loading.value = true;
+  try {
+    const snapshot = await client.snapshot();
+    if (generation !== connectionGeneration) return;
+    if (!draftDirty.value) applyConfig(snapshot);
+    reconnectAttempts = 0;
+    reconnecting.value = false;
+    connected.value = true;
+    startRefreshTimer();
+    flash(
+      "success",
+      draftDirty.value
+        ? "CPA 已重新连接，未保存修改已保留"
+        : "CPA 已重新连接并刷新配置",
+    );
+  } catch (error) {
+    if (generation !== connectionGeneration) return;
+    reconnectAttempts += 1;
+    connected.value = false;
+    reconnecting.value = true;
+    if (manual) flash("error", `重连失败：${errorMessage(error)}`);
+    scheduleReconnect();
+  } finally {
+    if (generation === connectionGeneration) connectionCheckInFlight = false;
+    if (manual) loading.value = false;
+  }
+}
+
 async function connect() {
   if (!managementKey.value) return flash("error", "请输入 管理密钥");
+  resetReconnectState();
   loading.value = true;
   try {
     await client.connect(
@@ -713,14 +798,14 @@ async function connect() {
     applyConfig(config);
     connected.value = true;
     page.value = "dashboard";
-    clearInterval(refreshTimer);
-    refreshTimer = setInterval(() => refresh(true), 10000);
+    startRefreshTimer();
     flash(
       "success",
       `已连接 CPA，加载 ${credentials.value.length} 个 Credential`,
     );
   } catch (error) {
     connected.value = false;
+    reconnecting.value = false;
     flash("error", error.message);
   } finally {
     loading.value = false;
@@ -740,6 +825,7 @@ async function disconnect() {
   )
     return;
 
+  resetReconnectState();
   loading.value = true;
   try {
     await client.disconnect();
@@ -885,20 +971,67 @@ async function toggleCredentialEnabled(credential) {
 }
 
 async function refresh(silent = false) {
-  if (!connected.value) return;
+  if (reconnecting.value) {
+    if (!silent) await attemptReconnect(true);
+    return;
+  }
+  if (!connected.value || connectionCheckInFlight) return;
+  if (silent && loading.value) return;
   if (draftDirty.value) {
     if (!silent) flash("error", "存在未保存修改，请先应用后再刷新");
     return;
   }
+
+  const generation = connectionGeneration;
+  connectionCheckInFlight = true;
   if (!silent) loading.value = true;
   try {
-    applyConfig(await client.snapshot());
+    const snapshot = await client.snapshot();
+    if (generation !== connectionGeneration) return;
+    applyConfig(snapshot);
     if (!silent) flash("success", "已从 CPA 重新拉取配置");
   } catch (error) {
-    connected.value = false;
-    flash("error", error.message);
+    if (generation === connectionGeneration) markConnectionInterrupted(error);
   } finally {
-    loading.value = false;
+    if (generation === connectionGeneration) connectionCheckInFlight = false;
+    if (!silent) loading.value = false;
+  }
+}
+
+function isRemoteModelMissing(error) {
+  const message = errorMessage(error);
+  return (
+    /模型 .+ 不存在/.test(message) ||
+    /OpenAI 兼容模型 .+ 不存在/.test(message) ||
+    /openai-compatibility\[\d+\].*不存在/.test(message)
+  );
+}
+
+function isConnectionFailure(error) {
+  const message = errorMessage(error);
+  return /CPA (connection|response) failed|Failed to fetch|NetworkError|HTTP (401|403|408|429|5\d\d)/i.test(
+    message,
+  );
+}
+
+async function handleAliasMutationError(error) {
+  if (isConnectionFailure(error)) {
+    markConnectionInterrupted(error);
+    return;
+  }
+  if (!isRemoteModelMissing(error)) {
+    flash("error", errorMessage(error));
+    return;
+  }
+
+  try {
+    applyConfig(await client.snapshot());
+    flash(
+      "error",
+      `${errorMessage(error)}。远程配置已变化，已刷新本地列表，本次操作未写入。`,
+    );
+  } catch (refreshError) {
+    markConnectionInterrupted(refreshError);
   }
 }
 
@@ -923,7 +1056,7 @@ async function assignAlias(credential, modelName) {
     );
     flash("success", `已将 ${modelName} 设置为 ${selectedAliasName.value}`);
   } catch (error) {
-    flash("error", error.message);
+    await handleAliasMutationError(error);
   } finally {
     loading.value = false;
   }
@@ -944,7 +1077,7 @@ async function removeAlias(credential, modelName) {
     applyConfig(await client.updateModelAlias(credential, modelName, "", true));
     flash("success", `已移除 ${modelName} 的别名`);
   } catch (error) {
-    flash("error", error.message);
+    await handleAliasMutationError(error);
   } finally {
     loading.value = false;
   }
@@ -1262,6 +1395,7 @@ const bootstrapSourceLabels = {
 
 onUnmounted(() => {
   clearInterval(refreshTimer);
+  clearTimeout(reconnectTimer);
   clearInterval(updateTimer);
 });
 onMounted(async () => {
@@ -1279,10 +1413,10 @@ onMounted(async () => {
         config: result.config,
         authFiles: await client.authFiles(),
       });
+      resetReconnectState();
       connected.value = true;
       page.value = "dashboard";
-      clearInterval(refreshTimer);
-      refreshTimer = setInterval(() => refresh(true), 10000);
+      startRefreshTimer();
       const source = bootstrapSourceLabels[result.source] || "自动配置";
       flash("success", `已从 ${source} 自动连接 CPA`);
       return;
@@ -1309,12 +1443,29 @@ onMounted(async () => {
       </div>
       <div class="instance">
         <div class="instance-button">
-          <span class="status-dot" :class="{ offline: !connected }"></span>
+          <span
+            class="status-dot"
+            :class="{ offline: !sessionAvailable, reconnecting }"
+          ></span>
           <span class="instance-status-text">{{
-            connected ? "CPA 已连接" : "CPA 未连接"
+            reconnecting
+              ? "CPA 重连中"
+              : connected
+                ? "CPA 已连接"
+                : "CPA 未连接"
           }}</span>
         </div>
-        <div v-if="connected" class="instance-actions">
+        <div v-if="sessionAvailable" class="instance-actions">
+          <button
+            v-if="reconnecting"
+            class="instance-action"
+            title="立即重连"
+            aria-label="立即重连"
+            :disabled="loading"
+            @click="attemptReconnect(true)"
+          >
+            <RefreshCw :size="14" class="spin" />
+          </button>
           <button
             class="instance-action"
             title="复制管理密钥"
@@ -1334,7 +1485,7 @@ onMounted(async () => {
         </div>
       </div>
       <nav>
-        <template v-if="connected">
+        <template v-if="sessionAvailable">
           <div class="nav-label">CONTROL CENTER</div>
           <button
             class="nav-item"
@@ -1366,9 +1517,14 @@ onMounted(async () => {
       </nav>
       <div class="sidebar-foot">
         <div class="daemon">
-          <span class="pulse" :class="{ offline: !connected }"></span
+          <span
+            class="pulse"
+            :class="{ offline: !sessionAvailable, reconnecting }"
+          ></span
           ><span>OFFICIAL API</span
-          ><b>{{ connected ? "ONLINE" : "OFFLINE" }}</b>
+          ><b>{{
+            reconnecting ? "RETRYING" : connected ? "ONLINE" : "OFFLINE"
+          }}</b>
         </div>
         <button
           class="version version-check"
@@ -1453,14 +1609,14 @@ onMounted(async () => {
           </button>
           <button
             class="icon-button"
-            :disabled="!connected"
+            :disabled="!sessionAvailable || loading"
             @click="refresh()"
             title="从 CPA 刷新"
           >
             <RefreshCw :size="17" :class="{ spin: loading }" />
           </button>
           <button
-            v-if="connected"
+            v-if="sessionAvailable"
             class="icon-button logout-icon"
             :disabled="loading"
             @click="disconnect"
