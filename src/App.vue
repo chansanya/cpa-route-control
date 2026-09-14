@@ -30,7 +30,12 @@ import {
   WifiOff,
   X,
 } from "@lucide/vue";
-import { CpaManagementClient, DEFAULT_MANAGEMENT_URL, isTauri } from "./api";
+import {
+  CpaManagementClient,
+  DEFAULT_MANAGEMENT_URL,
+  isTauri,
+  openExternalUrl,
+} from "./api";
 import { normalizeSnapshot } from "./cpa-config";
 import packageMeta from "../package.json";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
@@ -760,21 +765,22 @@ async function disconnect() {
   }
 }
 
-function openCpaWeb() {
-  if (desktop) {
-    window.open(cpaWebUrl.value, "_blank", "noopener,noreferrer");
-    return;
+async function openCpaWeb() {
+  try {
+    await openExternalUrl(cpaWebUrl.value);
+  } catch (error) {
+    flash("error", error.message || "无法打开系统浏览器");
   }
-  window.open(cpaWebUrl.value, "_blank");
 }
 
 async function copyManagementKey() {
-  if (!managementKey.value) return;
   try {
-    await navigator.clipboard.writeText(managementKey.value);
+    const key = managementKey.value || (await client.currentManagementKey());
+    if (!key) throw new Error("当前连接没有可复制的管理密钥");
+    await navigator.clipboard.writeText(key);
     flash("success", "管理密钥已复制");
-  } catch {
-    flash("error", "复制失败，请手动输入管理密钥");
+  } catch (error) {
+    flash("error", error.message || "复制失败，请手动输入管理密钥");
   }
 }
 
@@ -817,9 +823,13 @@ async function checkForUpdate() {
   }
 }
 
-function openUpdateDownload() {
+async function openUpdateDownload() {
   if (!updateInfo.value?.url) return;
-  window.open(updateInfo.value.url, "_blank", "noopener,noreferrer");
+  try {
+    await openExternalUrl(updateInfo.value.url);
+  } catch (error) {
+    flash("error", error.message || "无法打开更新下载页面");
+  }
 }
 
 function credentialStatusName(credential) {
@@ -1225,19 +1235,39 @@ async function deleteStrategy(strategy) {
   flash("success", `策略「${strategy.name}」已删除`);
 }
 
+const bootstrapSourceLabels = {
+  install_env: "安装目录 .env",
+  process_env: "系统环境变量",
+  credential_manager: "Windows Credential Manager",
+};
+
 onUnmounted(() => clearInterval(refreshTimer));
 onMounted(async () => {
   checkForUpdate();
   if (!desktop) return;
   loading.value = true;
   try {
-    const config = await client.restore(managementUrl.value);
-    if (config) {
-      applyConfig(await client.snapshot());
+    const result = await client.bootstrap(managementUrl.value);
+    if (result.status === "connected") {
+      managementUrl.value = result.baseUrl;
+      managementKey.value = "";
+      localStorage.setItem("cpa-management-url", result.baseUrl);
+      applyConfig({
+        config: result.config,
+        authFiles: await client.authFiles(),
+      });
       connected.value = true;
       page.value = "dashboard";
+      clearInterval(refreshTimer);
       refreshTimer = setInterval(() => refresh(true), 10000);
-      flash("success", "已从 Windows Credential Manager 恢复 CPA 连接");
+      const source = bootstrapSourceLabels[result.source] || "自动配置";
+      flash("success", `已从 ${source} 自动连接 CPA`);
+      return;
+    }
+    if (result.status === "failed") {
+      if (result.baseUrl) managementUrl.value = result.baseUrl;
+      const source = bootstrapSourceLabels[result.source] || "自动配置";
+      flash("error", `${source} 连接失败：${result.message}`);
     }
   } catch (error) {
     flash("error", error.message);
@@ -1270,9 +1300,16 @@ onMounted(async () => {
             <Copy :size="14" />
           </button>
         </div>
-        <div class="instance-url">
-          {{ managementUrl.replace(/^https?:\/\//, "") }}
-        </div>
+        <button
+          v-if="connected"
+          class="instance-external"
+          title="在系统浏览器打开 CPA 管理后台"
+          aria-label="在系统浏览器打开 CPA 管理后台"
+          @click="openCpaWeb"
+        >
+          <ExternalLink :size="12" />
+          <span>浏览器打开</span>
+        </button>
       </div>
       <nav>
         <template v-if="connected">

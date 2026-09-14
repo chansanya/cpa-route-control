@@ -5,3 +5,4 @@ data-*.json
 config.yaml
 target/
 *.tmp
+.env

@@ -18,6 +18,28 @@ CPA 明文管理密钥: config.yaml 被 bcrypt 加密前的原始密钥
 
 浏览器调试不持久化密钥；Tauri 勾选“记住密钥”后使用 Windows Credential Manager 安全保存。浏览器通过 Vite 代理访问本地 CPA，Tauri 使用 Rust `reqwest` 直接访问 CPA。
 
+## 桌面端自动连接
+
+桌面应用启动时可从主程序 EXE 同目录的 `.env`，或从启动进程继承的系统/用户环境变量读取 CPA 连接信息：
+
+```dotenv
+CPA_MANAGEMENT_URL=http://127.0.0.1:8317/v0/management
+CPA_MANAGEMENT_KEY=your-plaintext-management-key
+```
+
+两项必须在同一来源中同时配置且不能为空。读取优先级为：
+
+```text
+EXE 同目录 .env > 系统/进程环境变量 > Windows Credential Manager > 手工输入
+```
+
+- 安装版将 `.env` 放在已安装的 `CPA Route Control` 主程序旁；便携版放在便携 EXE 旁。
+- `.env` 不会被打进安装包，并已加入 `.gitignore`。它包含明文管理密钥，请限制文件访问权限，不要提交到 Git。
+- 自动配置存在但格式错误、字段不完整或连接失败时，应用会停留在连接页，不再尝试低优先级来源。
+- 自动连接只作用于 CPA Route Control。系统浏览器中打开的官方 `/management.html` 仍使用自己的登录状态。
+- CPA 没有独立的管理账号字段；这里的“登录信息”是 Management URL 和 bcrypt 加密前的明文 Management Key。
+- 普通浏览器页面无法读取本机环境变量或 EXE 目录文件，因此该能力仅在 Tauri 桌面端生效。
+
 ## 已接入的官方接口
 
 - `GET /config`：读取当前运行时配置；

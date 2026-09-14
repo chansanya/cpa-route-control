@@ -133,15 +133,21 @@ button {
   background: var(--red);
   box-shadow: 0 0 0 4px rgba(255, 127, 137, 0.08);
 }
-.instance-url {
+.instance-external {
+  margin: 8px 0 0 15px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  color: var(--dim);
   font:
     10px "DM Mono",
     monospace;
-  color: var(--dim);
-  margin: 8px 0 0 16px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  transition: color 0.18s ease;
+}
+.instance-external:hover {
+  color: var(--cyan);
 }
 .nav-label {
   font:

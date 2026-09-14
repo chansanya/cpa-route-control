@@ -1,9 +1,17 @@
 import { invoke } from "@tauri-apps/api/core";
+import { openUrl } from "@tauri-apps/plugin-opener";
 
 export const DEFAULT_MANAGEMENT_URL = "http://127.0.0.1:8317/v0/management";
 
 export function isTauri() {
   return "__TAURI_INTERNALS__" in window;
+}
+
+export async function openExternalUrl(url) {
+  if (isTauri()) return openUrl(url);
+  const opened = window.open(url, "_blank");
+  if (!opened) throw new Error("浏览器阻止了新窗口，请允许弹出窗口后重试");
+  opened.opener = null;
 }
 
 export class CpaManagementClient {
@@ -24,12 +32,20 @@ export class CpaManagementClient {
     return this.request("/config");
   }
 
-  async restore(baseUrl) {
+  async bootstrap(baseUrl) {
     this.baseUrl = String(baseUrl).replace(/\/$/, "");
-    if (!isTauri()) return null;
-    return invoke("restore_cpa", { baseUrl: this.baseUrl });
+    if (!isTauri()) return { status: "not_configured" };
+    const result = await invoke("bootstrap_cpa", {
+      fallbackBaseUrl: this.baseUrl,
+    });
+    if (result.baseUrl) this.baseUrl = result.baseUrl;
+    return result;
   }
 
+  async currentManagementKey() {
+    if (!isTauri()) return this.managementKey;
+    return invoke("current_management_key");
+  }
   async disconnect() {
     if (isTauri()) await invoke("disconnect_cpa");
     this.managementKey = "";
