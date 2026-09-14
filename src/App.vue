@@ -47,6 +47,7 @@ import StrategyEditorModal from "./components/StrategyEditorModal.vue";
 
 const appVersion = packageMeta.version;
 const updateInfo = ref(null);
+const checkingForUpdate = ref(false);
 const client = new CpaManagementClient();
 const page = ref("settings");
 const managementUrl = ref(
@@ -87,6 +88,7 @@ const editingStrategyId = ref(null);
 const selectedStrategyId = ref(null);
 const strategies = ref(loadStrategies());
 let refreshTimer;
+let updateTimer;
 
 const selectedAliasName = ref("code");
 const aliasPageTab = ref("strategy");
@@ -802,24 +804,41 @@ function isNewerVersion(latest, current) {
   return false;
 }
 
-async function checkForUpdate() {
+async function checkForUpdate(notify = false) {
+  if (checkingForUpdate.value) return;
+  checkingForUpdate.value = true;
   try {
-    const response = await fetch(
+    const endpoint = new URL(
       "https://api.github.com/repos/chansanya/cpa-route-control/releases/latest",
     );
-    if (!response.ok) return;
+    endpoint.searchParams.set("_", Date.now().toString());
+    const response = await fetch(endpoint, {
+      cache: "no-store",
+      headers: { Accept: "application/vnd.github+json" },
+    });
+    if (!response.ok) {
+      throw new Error(`GitHub Releases API 返回 HTTP ${response.status}`);
+    }
     const release = await response.json();
-    if (!release?.tag_name) return;
-    if (!isNewerVersion(release.tag_name, `v${appVersion}`)) return;
-    const asset = (release.assets || []).find((item) =>
-      /\.exe$/i.test(item.name),
-    );
+    if (!release?.tag_name) throw new Error("GitHub Release 缺少版本标签");
+    if (!isNewerVersion(release.tag_name, `v${appVersion}`)) {
+      updateInfo.value = null;
+      if (notify) flash("success", `当前 v${appVersion} 已是最新版本`);
+      return;
+    }
+    const assets = Array.isArray(release.assets) ? release.assets : [];
+    const asset =
+      assets.find((item) => /setup\.exe$/i.test(item.name)) ||
+      assets.find((item) => /\.exe$/i.test(item.name));
     updateInfo.value = {
       version: release.tag_name,
       url: asset?.browser_download_url || release.html_url,
     };
-  } catch {
-    // GitHub 不可达时静默忽略，不阻塞应用启动。
+    if (notify) flash("success", `发现新版本 ${release.tag_name}`);
+  } catch (error) {
+    if (notify) flash("error", error.message || "检查更新失败");
+  } finally {
+    checkingForUpdate.value = false;
   }
 }
 
@@ -1241,9 +1260,13 @@ const bootstrapSourceLabels = {
   credential_manager: "Windows Credential Manager",
 };
 
-onUnmounted(() => clearInterval(refreshTimer));
+onUnmounted(() => {
+  clearInterval(refreshTimer);
+  clearInterval(updateTimer);
+});
 onMounted(async () => {
   checkForUpdate();
+  updateTimer = setInterval(() => checkForUpdate(), 30 * 60 * 1000);
   if (!desktop) return;
   loading.value = true;
   try {
@@ -1348,9 +1371,26 @@ onMounted(async () => {
           ><span>OFFICIAL API</span
           ><b>{{ connected ? "ONLINE" : "OFFLINE" }}</b>
         </div>
-        <div class="version">
-          DIRECT CLIENT <span>v{{ appVersion }}</span>
-        </div>
+        <button
+          class="version version-check"
+          :disabled="checkingForUpdate"
+          title="检查新版本"
+          aria-label="检查新版本"
+          @click="checkForUpdate(true)"
+        >
+          DIRECT CLIENT
+          <span>{{ checkingForUpdate ? "CHECKING" : `v${appVersion}` }}</span>
+        </button>
+        <button
+          v-if="updateInfo"
+          class="sidebar-update"
+          :title="`下载新版本 ${updateInfo.version}`"
+          :aria-label="`下载新版本 ${updateInfo.version}`"
+          @click="openUpdateDownload"
+        >
+          <Download :size="12" />
+          <span>更新至 {{ updateInfo.version }}</span>
+        </button>
       </div>
     </aside>
 
