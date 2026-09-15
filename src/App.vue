@@ -54,11 +54,13 @@ const managementUrl = ref(
   localStorage.getItem("cpa-management-url") || DEFAULT_MANAGEMENT_URL,
 );
 const desktop = isTauri();
-const cpaWebUrl = computed(() =>
-  desktop
-    ? `${new URL(managementUrl.value).origin}/management.html`
-    : "/management.html",
-);
+const cpaWebUrl = computed(() => {
+  try {
+    return `${new URL(managementUrl.value).origin}/management.html`;
+  } catch {
+    return "/management.html";
+  }
+});
 const rememberedBrowserKey = desktop
   ? ""
   : sessionStorage.getItem("cpa-management-key") || "";
@@ -861,6 +863,14 @@ async function openCpaWeb() {
   }
 }
 
+function openCpaSite() {
+  if (desktop) {
+    page.value = "web";
+    return;
+  }
+  openCpaWeb();
+}
+
 async function copyManagementKey() {
   try {
     const key = managementKey.value || (await client.currentManagementKey());
@@ -1502,7 +1512,7 @@ onMounted(async () => {
           <button
             class="nav-item"
             :class="{ active: page === 'web' }"
-            @click="page = 'web'"
+            @click="openCpaSite"
           >
             <ExternalLink :size="17" /><span>CPA 网站</span
             ><ArrowUpRight v-if="page === 'web'" :size="14" class="nav-arrow" />
