@@ -54,9 +54,18 @@ const managementUrl = ref(
   localStorage.getItem("cpa-management-url") || DEFAULT_MANAGEMENT_URL,
 );
 const desktop = isTauri();
-const cpaWebUrl = computed(() => {
+const cpaManagementPageUrl = computed(() => {
   try {
     return `${new URL(managementUrl.value).origin}/management.html`;
+  } catch {
+    return "/management.html";
+  }
+});
+const cpaWebUrl = computed(() => {
+  if (desktop) return cpaManagementPageUrl.value;
+  try {
+    const origin = new URL(managementUrl.value).origin;
+    return `/management.html?cpa-origin=${encodeURIComponent(origin)}`;
   } catch {
     return "/management.html";
   }
@@ -864,11 +873,16 @@ async function openCpaWeb() {
 }
 
 function openCpaSite() {
-  if (desktop) {
-    page.value = "web";
-    return;
+  if (!desktop) {
+    try {
+      localStorage.setItem("apiBase", new URL(managementUrl.value).origin);
+      localStorage.removeItem("cli-proxy-auth");
+    } catch {
+      localStorage.removeItem("apiBase");
+      localStorage.removeItem("cli-proxy-auth");
+    }
   }
-  openCpaWeb();
+  page.value = "web";
 }
 
 async function copyManagementKey() {
